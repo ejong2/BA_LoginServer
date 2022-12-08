@@ -86,6 +86,7 @@ unsigned WINAPI WorkThread(void* Args)
     {
         char IdBuffer[PACKET_SIZE] = { 0, };
         char PwdBuffer[PACKET_SIZE] = { 0, };
+        char LoginBuffer[PACKET_SIZE] = "true";
 
         int RecvBytes = recv(CS, IdBuffer, sizeof(IdBuffer), 0);
         if (RecvBytes <= 0)
@@ -114,6 +115,8 @@ unsigned WINAPI WorkThread(void* Args)
         }
         PwdBuffer[PACKET_SIZE - 1] = '\0';
         string strPWD = PwdBuffer;
+
+        string strLogin = LoginBuffer;
 
         pstmt = con->prepareStatement("SELECT COUNT(1) AS `CNT` FROM UserTable WHERE `ID`= ? AND `PWD`= (?)");
         pstmt->setString(1, strID);
@@ -150,9 +153,24 @@ unsigned WINAPI WorkThread(void* Args)
             LeaveCriticalSection(&ServerCS);
 
             cout << "로그인이 성공하였습니다." << endl;
+
+            sql::Statement* pstmt;
+            pstmt = con->createStatement();
+            pstmt->executeUpdate("UPDATE UserTable SET isLogin = true WHERE isLogin = false AND ID = " + strID + "");
+            delete pstmt;
         }
         else
         {
+            int SendBytes = 0;
+            int TotalSentBytes = 0;
+
+            char Fail[PACKET_SIZE] = "-1";
+            do
+            {
+                SendBytes = send(CS, &Fail[TotalSentBytes], sizeof(Fail) - TotalSentBytes, 0);
+                TotalSentBytes += SendBytes;
+            } while (TotalSentBytes < sizeof(Fail));
+
             cout << "로그인이 실패하였습니다." << endl;
         }
     }
@@ -163,7 +181,7 @@ int main()
 {
     driver = get_driver_instance();
     con = driver->connect(server, username, password);
-    con->setSchema("LoginSheet");
+    con->setSchema("UE4SERVER");
 
     cout << "[로그인 서버 활성화]" << '\n';
 
