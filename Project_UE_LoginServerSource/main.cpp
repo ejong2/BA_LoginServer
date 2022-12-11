@@ -18,7 +18,7 @@
 
 #define PORT 19936
 #define IP_ADDRESS "127.0.0.1"
-#define PACKET_SIZE 50
+#define PACKET_SIZE 200
 
 using namespace std;
 
@@ -87,6 +87,7 @@ unsigned WINAPI WorkThread(void* Args)
         char IdBuffer[PACKET_SIZE] = { 0, };
         char PwdBuffer[PACKET_SIZE] = { 0, };
         char LoginBuffer[PACKET_SIZE] = "true";
+        char FailBuffer[PACKET_SIZE] = "-1";
 
         int RecvBytes = recv(CS, IdBuffer, sizeof(IdBuffer), 0);
         if (RecvBytes <= 0)
@@ -118,29 +119,29 @@ unsigned WINAPI WorkThread(void* Args)
 
         string strLogin = LoginBuffer;
 
-        pstmt = con->prepareStatement("SELECT COUNT(1) AS `CNT` FROM UserTable WHERE `ID`= ? AND `PWD`= (?)");
+        pstmt = con->prepareStatement("SELECT isLogin FROM UserTable WHERE `ID` = ?");
         pstmt->setString(1, strID);
-        pstmt->setString(2, strPWD);
         rs = pstmt->executeQuery();
 
-        bool isExists = false;
+        bool isLogin = false;
+
         while (rs->next())
         {
-            isExists = rs->getInt("CNT") > 0 ? true : false;
+            isLogin = rs->getBoolean("isLogin");
             break;
         }
-        if (isExists)
+
+        if (isLogin == true)
         {
             EnterCriticalSection(&ServerCS);
             int SendBytes = 0;
             int TotalSentBytes = 0;
 
-            char Success[PACKET_SIZE] = "LoginSuccess";
             do
             {
-                SendBytes = send(CS, &Success[TotalSentBytes], sizeof(Success) - TotalSentBytes, 0);
+                SendBytes = send(CS, &FailBuffer[TotalSentBytes], sizeof(FailBuffer) - TotalSentBytes, 0);
                 TotalSentBytes += SendBytes;
-            } while (TotalSentBytes < sizeof(Success));
+            } while (TotalSentBytes < sizeof(FailBuffer));
 
             if (SendBytes <= 0)
             {
@@ -152,26 +153,67 @@ unsigned WINAPI WorkThread(void* Args)
             }
             LeaveCriticalSection(&ServerCS);
 
-            cout << "로그인이 성공하였습니다." << endl;
-
-            sql::Statement* pstmt;
-            pstmt = con->createStatement();
-            pstmt->executeUpdate("UPDATE UserTable SET isLogin = true WHERE isLogin = false AND ID = " + strID + "");
-            delete pstmt;
+            cout << "이미 접속중인 클라이언트입니다." << '\n';
         }
         else
         {
-            int SendBytes = 0;
-            int TotalSentBytes = 0;
+            pstmt = con->prepareStatement("SELECT COUNT(1) AS `CNT` FROM UserTable WHERE `ID`= ? AND `PWD`= (?)");
+            pstmt->setString(1, strID);
+            pstmt->setString(2, strPWD);
+            rs = pstmt->executeQuery();
 
-            char Fail[PACKET_SIZE] = "-1";
-            do
+            bool isExists = false;
+            while (rs->next())
             {
-                SendBytes = send(CS, &Fail[TotalSentBytes], sizeof(Fail) - TotalSentBytes, 0);
-                TotalSentBytes += SendBytes;
-            } while (TotalSentBytes < sizeof(Fail));
+                isExists = rs->getInt("CNT") > 0 ? true : false;
+                break;
+            }
+            if (isExists)
+            {
+                EnterCriticalSection(&ServerCS);
+                int SendBytes = 0;
+                int TotalSentBytes = 0;
 
-            cout << "로그인이 실패하였습니다." << endl;
+                char Success[PACKET_SIZE] = "LoginSuccess";
+                do
+                {
+                    SendBytes = send(CS, &Success[TotalSentBytes], sizeof(Success) - TotalSentBytes, 0);
+                    TotalSentBytes += SendBytes;
+                } while (TotalSentBytes < sizeof(Success));
+
+                if (SendBytes <= 0)
+                {
+                    closesocket(CS);
+                    EnterCriticalSection(&ServerCS);
+                    vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
+                    LeaveCriticalSection(&ServerCS);
+                    break;
+                }
+                LeaveCriticalSection(&ServerCS);
+
+                //send(CS, IdBuffer, sizeof(IdBuffer), 0);
+
+                cout << "로그인이 성공하였습니다." << endl;
+
+                sql::Statement* pstmt;
+                pstmt = con->createStatement();
+                pstmt->executeUpdate("UPDATE UserTable SET isLogin = true WHERE isLogin = false AND ID = '" + strID + "'");
+                delete pstmt;
+            }
+            else
+            {
+                int SendBytes = 0;
+                int TotalSentBytes = 0;
+
+                char FailBuffer[PACKET_SIZE] = "-1";
+                do
+                {
+                    SendBytes = send(CS, &FailBuffer[TotalSentBytes], sizeof(FailBuffer) - TotalSentBytes, 0);
+                    TotalSentBytes += SendBytes;
+                } while (TotalSentBytes < sizeof(FailBuffer));
+
+                cout << "[로그인 실패]" << endl;
+            }
         }
     }
     return 0;
@@ -219,4 +261,3 @@ int main()
 
     WSACleanup();
 }
-
