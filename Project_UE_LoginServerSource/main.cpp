@@ -17,7 +17,7 @@
 #pragma comment (lib, "mysqlcppconn.lib")
 
 #define PORT 19936
-#define IP_ADDRESS "127.0.0.1"
+#define IP_ADDRESS "172.16.2.84"
 #define PACKET_SIZE 200
 
 using namespace std;
@@ -141,6 +141,9 @@ unsigned WINAPI WorkThread(void* Args)
             {
                 SendBytes = send(CS, &FailBuffer[TotalSentBytes], sizeof(FailBuffer) - TotalSentBytes, 0);
                 TotalSentBytes += SendBytes;
+
+                cout << "접속중인 아이디" << '\n';
+
             } while (TotalSentBytes < sizeof(FailBuffer));
 
             if (SendBytes <= 0)
@@ -170,15 +173,58 @@ unsigned WINAPI WorkThread(void* Args)
             }
             if (isExists)
             {
+                pstmt = con->prepareStatement("SELECT PlayerName FROM UserTable WHERE `ID` = ?");
+                pstmt->setString(1, strID);
+                rs = pstmt->executeQuery();
+
+                char Name[PACKET_SIZE] = { 0, };
+                string PName;
+
+                while (rs->next())
+                {
+                    PName = rs->getString("PlayerName");
+                    break;
+                }
+
+                memcpy(Name, PName.c_str(), PName.size());
+
                 EnterCriticalSection(&ServerCS);
                 int SendBytes = 0;
                 int TotalSentBytes = 0;
+
+                do
+                {
+                    SendBytes = send(CS, &Name[TotalSentBytes], sizeof(Name) - TotalSentBytes, 0);
+                    TotalSentBytes += SendBytes;
+
+                    cout << "이름 전달" << '\n';
+
+                } while (TotalSentBytes < sizeof(Name));
+
+                if (SendBytes <= 0)
+                {
+                    closesocket(CS);
+                    EnterCriticalSection(&ServerCS);
+                    vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
+                    LeaveCriticalSection(&ServerCS);
+                    break;
+                }
+                LeaveCriticalSection(&ServerCS);
+
+                Sleep(1000);
+
+                EnterCriticalSection(&ServerCS);
+                SendBytes = 0;
+                TotalSentBytes = 0;
 
                 char Success[PACKET_SIZE] = "LoginSuccess";
                 do
                 {
                     SendBytes = send(CS, &Success[TotalSentBytes], sizeof(Success) - TotalSentBytes, 0);
                     TotalSentBytes += SendBytes;
+
+                    cout << "로그인 전달" << '\n';
+
                 } while (TotalSentBytes < sizeof(Success));
 
                 if (SendBytes <= 0)
@@ -191,14 +237,14 @@ unsigned WINAPI WorkThread(void* Args)
                 }
                 LeaveCriticalSection(&ServerCS);
 
-                //send(CS, IdBuffer, sizeof(IdBuffer), 0);
-
                 cout << "로그인이 성공하였습니다." << endl;
 
                 sql::Statement* pstmt;
                 pstmt = con->createStatement();
                 pstmt->executeUpdate("UPDATE UserTable SET isLogin = true WHERE isLogin = false AND ID = '" + strID + "'");
                 delete pstmt;
+
+                cout << "데이터베이스 업데이트 성공 !" << '\n';
             }
             else
             {
