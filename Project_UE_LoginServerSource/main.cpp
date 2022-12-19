@@ -17,7 +17,7 @@
 #pragma comment (lib, "mysqlcppconn.lib")
 
 #define PORT 19936
-#define IP_ADDRESS "127.0.0.1"
+#define IP_ADDRESS "172.16.2.84"
 #define PACKET_SIZE 200
 
 using namespace std;
@@ -87,7 +87,8 @@ unsigned WINAPI WorkThread(void* Args)
 		char IdBuffer[PACKET_SIZE] = { 0, };
 		char PwdBuffer[PACKET_SIZE] = { 0, };
 		char LoginBuffer[PACKET_SIZE] = "true";
-		char FailBuffer[PACKET_SIZE] = "-1";
+		char NotExitsBuffer[PACKET_SIZE] = "Not_Exits";
+		char AcceptingBuffer[PACKET_SIZE] = "Already_Accpet";
 
 		char Buffer[PACKET_SIZE] = { 0, };
 		int RecvBytes = recv(CS, Buffer, sizeof(Buffer), 0);
@@ -164,12 +165,12 @@ unsigned WINAPI WorkThread(void* Args)
 
 				do
 				{
-					SendBytes = send(CS, &FailBuffer[TotalSentBytes], sizeof(FailBuffer) - TotalSentBytes, 0);
+					SendBytes = send(CS, &AcceptingBuffer[TotalSentBytes], sizeof(AcceptingBuffer) - TotalSentBytes, 0);
 					TotalSentBytes += SendBytes;
 
 					cout << "접속중인 아이디" << '\n';
 
-				} while (TotalSentBytes < sizeof(FailBuffer));
+				} while (TotalSentBytes < sizeof(AcceptingBuffer));
 
 				if (SendBytes <= 0)
 				{
@@ -269,15 +270,13 @@ unsigned WINAPI WorkThread(void* Args)
 				{
 					int SendBytes = 0;
 					int TotalSentBytes = 0;
-
-					char FailBuffer[PACKET_SIZE] = "-1";
 					do
 					{
-						SendBytes = send(CS, &FailBuffer[TotalSentBytes], sizeof(FailBuffer) - TotalSentBytes, 0);
+						SendBytes = send(CS, &NotExitsBuffer[TotalSentBytes], sizeof(NotExitsBuffer) - TotalSentBytes, 0);
 						TotalSentBytes += SendBytes;
-					} while (TotalSentBytes < sizeof(FailBuffer));
+					} while (TotalSentBytes < sizeof(NotExitsBuffer));
 
-					cout << "[로그인 실패]" << endl;
+					cout << "존재하지 않는 아이디입니다." << endl;
 				}
 			}
 		}
