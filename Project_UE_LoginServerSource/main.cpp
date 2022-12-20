@@ -90,11 +90,9 @@ unsigned WINAPI WorkThread(void* Args)
 		char NotExitsBuffer[PACKET_SIZE] = "Not_Exits";
 		char AcceptingBuffer[PACKET_SIZE] = "Already_Accpet";
 
-		char Buffer[PACKET_SIZE] = { 0, };
-		int RecvBytes = recv(CS, Buffer, sizeof(Buffer), 0);
+		int RecvBytes = recv(CS, IdBuffer, sizeof(IdBuffer), 0);
 
-		string strPacket = Buffer;
-
+		string strPacket = IdBuffer;
 		if (strPacket == "LogoutPacket")
 		{
 			char PlayerNameBuffer[PACKET_SIZE] = { 0, };
@@ -113,64 +111,113 @@ unsigned WINAPI WorkThread(void* Args)
 			LeaveCriticalSection(&ServerCS);
 			break;
 		}
+		else if (RecvBytes <= 0)
+		{
+			cout << "클라이언트 연결 종료 : " << CS << '\n';
+
+			closesocket(CS);
+			EnterCriticalSection(&ServerCS);
+			vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
+			LeaveCriticalSection(&ServerCS);
+			break;
+		}
+		IdBuffer[PACKET_SIZE - 1] = '\0';
+		string strID = IdBuffer;
+
+		RecvBytes = recv(CS, PwdBuffer, sizeof(PwdBuffer), 0);
+		if (RecvBytes <= 0)
+		{
+			cout << "클라이언트 연결 종료 : " << CS << '\n';
+
+			closesocket(CS);
+			EnterCriticalSection(&ServerCS);
+			vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
+			LeaveCriticalSection(&ServerCS);
+			break;
+		}
+		PwdBuffer[PACKET_SIZE - 1] = '\0';
+		string strPWD = PwdBuffer;
+
+		string strLogin = LoginBuffer;
+
+		pstmt = con->prepareStatement("SELECT isLogin FROM UserTable WHERE `ID` = ?");
+		pstmt->setString(1, strID);
+		rs = pstmt->executeQuery();
+
+		bool isLogin = false;
+
+		while (rs->next())
+		{
+			isLogin = rs->getBoolean("isLogin");
+			break;
+		}
+
+		if (isLogin == true)
+		{
+			EnterCriticalSection(&ServerCS);
+			int SendBytes = 0;
+			int TotalSentBytes = 0;
+
+			do
+			{
+				SendBytes = send(CS, &AcceptingBuffer[TotalSentBytes], sizeof(AcceptingBuffer) - TotalSentBytes, 0);
+				TotalSentBytes += SendBytes;
+
+				cout << "접속중인 아이디" << '\n';
+
+			} while (TotalSentBytes < sizeof(AcceptingBuffer));
+
+			if (SendBytes <= 0)
+			{
+				closesocket(CS);
+				EnterCriticalSection(&ServerCS);
+				vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
+				LeaveCriticalSection(&ServerCS);
+				break;
+			}
+			LeaveCriticalSection(&ServerCS);
+
+			cout << "이미 접속중인 클라이언트입니다." << '\n';
+		}
 		else
 		{
-			RecvBytes = recv(CS, IdBuffer, sizeof(IdBuffer), 0);
-			if (RecvBytes <= 0)
-			{
-				cout << "클라이언트 연결 종료 : " << CS << '\n';
-
-				closesocket(CS);
-				EnterCriticalSection(&ServerCS);
-				vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
-				LeaveCriticalSection(&ServerCS);
-				break;
-			}
-			IdBuffer[PACKET_SIZE - 1] = '\0';
-			string strID = IdBuffer;
-
-			RecvBytes = recv(CS, PwdBuffer, sizeof(PwdBuffer), 0);
-			if (RecvBytes <= 0)
-			{
-				cout << "클라이언트 연결 종료 : " << CS << '\n';
-
-				closesocket(CS);
-				EnterCriticalSection(&ServerCS);
-				vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
-				LeaveCriticalSection(&ServerCS);
-				break;
-			}
-			PwdBuffer[PACKET_SIZE - 1] = '\0';
-			string strPWD = PwdBuffer;
-
-			string strLogin = LoginBuffer;
-
-			pstmt = con->prepareStatement("SELECT isLogin FROM UserTable WHERE `ID` = ?");
+			pstmt = con->prepareStatement("SELECT COUNT(1) AS `CNT` FROM UserTable WHERE `ID`= ? AND `PWD`= (?)");
 			pstmt->setString(1, strID);
+			pstmt->setString(2, strPWD);
 			rs = pstmt->executeQuery();
 
-			bool isLogin = false;
-
+			bool isExists = false;
 			while (rs->next())
 			{
-				isLogin = rs->getBoolean("isLogin");
+				isExists = rs->getInt("CNT") > 0 ? true : false;
 				break;
 			}
-
-			if (isLogin == true)
+			if (isExists)
 			{
+				pstmt = con->prepareStatement("SELECT PlayerName FROM UserTable WHERE `ID` = ?");
+				pstmt->setString(1, strID);
+				rs = pstmt->executeQuery();
+
+				char Name[PACKET_SIZE] = { 0, };
+				string PName;
+
+				while (rs->next())
+				{
+					PName = rs->getString("PlayerName");
+					break;
+				}
+
+				memcpy(Name, PName.c_str(), PName.size());
+
 				EnterCriticalSection(&ServerCS);
 				int SendBytes = 0;
 				int TotalSentBytes = 0;
 
 				do
 				{
-					SendBytes = send(CS, &AcceptingBuffer[TotalSentBytes], sizeof(AcceptingBuffer) - TotalSentBytes, 0);
+					SendBytes = send(CS, &Name[TotalSentBytes], sizeof(Name) - TotalSentBytes, 0);
 					TotalSentBytes += SendBytes;
-
-					cout << "접속중인 아이디" << '\n';
-
-				} while (TotalSentBytes < sizeof(AcceptingBuffer));
+				} while (TotalSentBytes < sizeof(Name));
 
 				if (SendBytes <= 0)
 				{
@@ -182,102 +229,49 @@ unsigned WINAPI WorkThread(void* Args)
 				}
 				LeaveCriticalSection(&ServerCS);
 
-				cout << "이미 접속중인 클라이언트입니다." << '\n';
+				Sleep(1000);
+
+				EnterCriticalSection(&ServerCS);
+				SendBytes = 0;
+				TotalSentBytes = 0;
+
+				char Success[PACKET_SIZE] = "LoginSuccess";
+				do
+				{
+					SendBytes = send(CS, &Success[TotalSentBytes], sizeof(Success) - TotalSentBytes, 0);
+					TotalSentBytes += SendBytes;
+				} while (TotalSentBytes < sizeof(Success));
+
+				if (SendBytes <= 0)
+				{
+					closesocket(CS);
+					EnterCriticalSection(&ServerCS);
+					vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
+					LeaveCriticalSection(&ServerCS);
+					break;
+				}
+				LeaveCriticalSection(&ServerCS);
+
+				cout << "로그인이 성공하였습니다." << endl;
+
+				sql::Statement* pstmt;
+				pstmt = con->createStatement();
+				pstmt->executeUpdate("UPDATE UserTable SET isLogin = true WHERE isLogin = false AND ID = '" + strID + "'");
+				delete pstmt;
+
+				cout << "데이터베이스 업데이트 성공 !" << '\n';
 			}
 			else
 			{
-				pstmt = con->prepareStatement("SELECT COUNT(1) AS `CNT` FROM UserTable WHERE `ID`= ? AND `PWD`= (?)");
-				pstmt->setString(1, strID);
-				pstmt->setString(2, strPWD);
-				rs = pstmt->executeQuery();
-
-				bool isExists = false;
-				while (rs->next())
+				int SendBytes = 0;
+				int TotalSentBytes = 0;
+				do
 				{
-					isExists = rs->getInt("CNT") > 0 ? true : false;
-					break;
-				}
-				if (isExists)
-				{
-					pstmt = con->prepareStatement("SELECT PlayerName FROM UserTable WHERE `ID` = ?");
-					pstmt->setString(1, strID);
-					rs = pstmt->executeQuery();
+					SendBytes = send(CS, &NotExitsBuffer[TotalSentBytes], sizeof(NotExitsBuffer) - TotalSentBytes, 0);
+					TotalSentBytes += SendBytes;
+				} while (TotalSentBytes < sizeof(NotExitsBuffer));
 
-					char Name[PACKET_SIZE] = { 0, };
-					string PName;
-
-					while (rs->next())
-					{
-						PName = rs->getString("PlayerName");
-						break;
-					}
-
-					memcpy(Name, PName.c_str(), PName.size());
-
-					EnterCriticalSection(&ServerCS);
-					int SendBytes = 0;
-					int TotalSentBytes = 0;
-
-					do
-					{
-						SendBytes = send(CS, &Name[TotalSentBytes], sizeof(Name) - TotalSentBytes, 0);
-						TotalSentBytes += SendBytes;
-					} while (TotalSentBytes < sizeof(Name));
-
-					if (SendBytes <= 0)
-					{
-						closesocket(CS);
-						EnterCriticalSection(&ServerCS);
-						vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
-						LeaveCriticalSection(&ServerCS);
-						break;
-					}
-					LeaveCriticalSection(&ServerCS);
-
-					Sleep(1000);
-
-					EnterCriticalSection(&ServerCS);
-					SendBytes = 0;
-					TotalSentBytes = 0;
-
-					char Success[PACKET_SIZE] = "LoginSuccess";
-					do
-					{
-						SendBytes = send(CS, &Success[TotalSentBytes], sizeof(Success) - TotalSentBytes, 0);
-						TotalSentBytes += SendBytes;
-					} while (TotalSentBytes < sizeof(Success));
-
-					if (SendBytes <= 0)
-					{
-						closesocket(CS);
-						EnterCriticalSection(&ServerCS);
-						vSocketList.erase(find(vSocketList.begin(), vSocketList.end(), CS));
-						LeaveCriticalSection(&ServerCS);
-						break;
-					}
-					LeaveCriticalSection(&ServerCS);
-
-					cout << "로그인이 성공하였습니다." << endl;
-
-					sql::Statement* pstmt;
-					pstmt = con->createStatement();
-					pstmt->executeUpdate("UPDATE UserTable SET isLogin = true WHERE isLogin = false AND ID = '" + strID + "'");
-					delete pstmt;
-
-					cout << "데이터베이스 업데이트 성공 !" << '\n';
-				}
-				else
-				{
-					int SendBytes = 0;
-					int TotalSentBytes = 0;
-					do
-					{
-						SendBytes = send(CS, &NotExitsBuffer[TotalSentBytes], sizeof(NotExitsBuffer) - TotalSentBytes, 0);
-						TotalSentBytes += SendBytes;
-					} while (TotalSentBytes < sizeof(NotExitsBuffer));
-
-					cout << "존재하지 않는 아이디입니다." << endl;
-				}
+				cout << "존재하지 않는 아이디입니다." << endl;
 			}
 		}
 	}
