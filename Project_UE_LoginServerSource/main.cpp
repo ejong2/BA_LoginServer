@@ -18,7 +18,7 @@
 
 #define PORT 19936
 #define IP_ADDRESS "172.16.2.84"
-#define PACKET_SIZE 200
+#define PACKET_SIZE 60
 
 using namespace std;
 
@@ -91,6 +91,7 @@ unsigned WINAPI WorkThread(void* Args)
 		char AcceptingBuffer[PACKET_SIZE] = "Already_Accpet";
 
 		int RecvBytes = recv(CS, IdBuffer, sizeof(IdBuffer), 0);
+		cout << "RecvBytes : " << RecvBytes << '\n';
 
 		string strPacket = IdBuffer;
 		if (strPacket == "LogoutPacket")
@@ -125,6 +126,9 @@ unsigned WINAPI WorkThread(void* Args)
 		string strID = IdBuffer;
 
 		RecvBytes = recv(CS, PwdBuffer, sizeof(PwdBuffer), 0);
+
+		cout << "RecvBytes : " << RecvBytes << '\n';
+
 		if (RecvBytes <= 0)
 		{
 			cout << "클라이언트 연결 종료 : " << CS << '\n';
@@ -229,7 +233,7 @@ unsigned WINAPI WorkThread(void* Args)
 				}
 				LeaveCriticalSection(&ServerCS);
 
-				Sleep(1000);
+				Sleep(100);
 
 				EnterCriticalSection(&ServerCS);
 				SendBytes = 0;
